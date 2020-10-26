@@ -25,17 +25,23 @@ package io.github.dsheirer.gui.playlist.channel;
 import io.github.dsheirer.alias.AliasModel;
 import io.github.dsheirer.controller.channel.Channel;
 import io.github.dsheirer.controller.channel.ChannelException;
+import io.github.dsheirer.eventbus.MyEventBus;
 import io.github.dsheirer.gui.control.MaxLengthUnaryOperator;
 import io.github.dsheirer.gui.playlist.Editor;
+import io.github.dsheirer.gui.preference.PreferenceEditorType;
+import io.github.dsheirer.gui.preference.ViewUserPreferenceEditorRequest;
 import io.github.dsheirer.module.decode.DecoderType;
 import io.github.dsheirer.module.decode.config.AuxDecodeConfiguration;
 import io.github.dsheirer.module.decode.config.DecodeConfiguration;
 import io.github.dsheirer.module.log.config.EventLogConfiguration;
 import io.github.dsheirer.playlist.PlaylistManager;
+import io.github.dsheirer.preference.UserPreferences;
 import io.github.dsheirer.record.config.RecordConfiguration;
 import io.github.dsheirer.source.config.SourceConfigTuner;
 import io.github.dsheirer.source.config.SourceConfiguration;
 import io.github.dsheirer.source.tuner.TunerModel;
+import io.github.dsheirer.util.ThreadPool;
+import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import javafx.collections.transformation.FilteredList;
@@ -46,6 +52,7 @@ import javafx.geometry.Insets;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
 import javafx.scene.control.ButtonType;
+import javafx.scene.control.CheckBox;
 import javafx.scene.control.ComboBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ScrollPane;
@@ -76,6 +83,7 @@ public abstract class ChannelConfigurationEditor extends Editor<Channel>
     private final static Logger mLog = LoggerFactory.getLogger(ChannelConfigurationEditor.class);
 
     private PlaylistManager mPlaylistManager;
+    private UserPreferences mUserPreferences;
     protected EditorModificationListener mEditorModificationListener = new EditorModificationListener();
     private Button mPlayButton;
     private TextField mSystemField;
@@ -95,9 +103,10 @@ public abstract class ChannelConfigurationEditor extends Editor<Channel>
     private IconNode mStopGraphicNode;
     private ChannelProcessingMonitor mChannelProcessingMonitor = new ChannelProcessingMonitor();
 
-    public ChannelConfigurationEditor(PlaylistManager playlistManager)
+    public ChannelConfigurationEditor(PlaylistManager playlistManager, UserPreferences userPreferences)
     {
         mPlaylistManager = playlistManager;
+        mUserPreferences = userPreferences;
 
         setMaxWidth(Double.MAX_VALUE);
 
@@ -242,6 +251,9 @@ public abstract class ChannelConfigurationEditor extends Editor<Channel>
         {
             getItem().setSystem(getSystemField().getText());
             getItem().setSite(getSiteField().getText());
+
+            //Hack - change the name to something else and then set it to the real value to trigger change events
+            getItem().setName(" ");
             getItem().setName(getNameField().getText());
             getItem().setAliasListName(getAliasListComboBox().getSelectionModel().getSelectedItem());
             getItem().setAutoStart(getAutoStartSwitch().isSelected());
@@ -297,57 +309,118 @@ public abstract class ChannelConfigurationEditor extends Editor<Channel>
             mPlayButton.setOnAction((ActionEvent event) -> {
                 if(getItem() != null)
                 {
-                    if(getItem().processingProperty().get())
+                    if(modifiedProperty().get())
                     {
-                        try
-                        {
-                            mPlaylistManager.getChannelProcessingManager().stop(getItem());
-                        }
-                        catch(ChannelException ce)
-                        {
-                            mLog.error("Error stopping channel [" + getItem().getName() + "] - " + ce.getMessage());
+                        Alert alert = new Alert(Alert.AlertType.WARNING,
+                            "Do you want to save these changes?", ButtonType.YES, ButtonType.NO);
+                        alert.setTitle("Channel Configuration Modified");
+                        alert.setHeaderText("Channel configuration has unsaved changes");
+                        alert.initOwner((getPlayButton()).getScene().getWindow());
+                        alert.showAndWait().ifPresent(buttonType -> {
+                            if(buttonType == ButtonType.YES)
+                            {
+                                save();
+                            }
+                        });
+                    }
 
-                            Alert alert = new Alert(Alert.AlertType.ERROR, "Error: " + ce.getMessage(), ButtonType.OK);
-                            alert.setTitle("Channel Stop Error");
-                            alert.setHeaderText("Can't stop channel");
-                            alert.initOwner((getPlayButton()).getScene().getWindow());
-                            alert.showAndWait();
+                    if(requiresJmbeLibrarySetup() &&
+                       mUserPreferences.getJmbeLibraryPreference().getAlertIfMissingLibraryRequired() &&
+                       !getItem().processingProperty().get())
+                    {
+                        String content = "The decoder for this channel configuration requires the (optional) JMBE " +
+                            "library to produce audio and the JMBE library is not currently setup.  Do you want to " +
+                            "setup the JMBE library?";
+
+                        Alert alert = new Alert(Alert.AlertType.CONFIRMATION, content, ButtonType.YES, ButtonType.NO);
+                        alert.setTitle("JMBE Library");
+                        alert.setHeaderText("Setup JMBE Library?");
+
+                        Label label = new Label(content);
+                        label.setMaxWidth(Double.MAX_VALUE);
+                        label.setMaxHeight(Double.MAX_VALUE);
+                        label.getStyleClass().add("content");
+                        label.setWrapText(true);
+
+                        CheckBox checkBox = new CheckBox("Don't Show This Again");
+                        checkBox.setOnAction(event1 -> {
+                            boolean dontShowAgain = checkBox.isSelected();
+                            mUserPreferences.getJmbeLibraryPreference().setAlertIfMissingLibraryRequired(!dontShowAgain);
+                        });
+
+                        VBox contentBox = new VBox();
+                        contentBox.setPrefWidth(360);
+                        contentBox.setSpacing(10);
+                        contentBox.getChildren().addAll(label, checkBox);
+                        alert.getDialogPane().setContent(contentBox);
+                        alert.initOwner(getPlayButton().getScene().getWindow());
+                        Optional<ButtonType> optionalButtonType = alert.showAndWait();
+
+                        if(optionalButtonType.isPresent() && optionalButtonType.get() == ButtonType.YES)
+                        {
+                            MyEventBus.getGlobalEventBus().post(new ViewUserPreferenceEditorRequest(PreferenceEditorType.JMBE_LIBRARY));
+                            return;
                         }
+                    }
+
+                    if(!getItem().processingProperty().get())
+                    {
+                        ThreadPool.SCHEDULED.execute(() -> {
+                            try
+                            {
+                                mPlaylistManager.getChannelProcessingManager().start(getItem());
+                            }
+                            catch(ChannelException ce)
+                            {
+                                mLog.error("Error starting channel [" + getItem().getName() + "] - " + ce.getMessage());
+
+                                Platform.runLater(() -> {
+                                    Alert alert = new Alert(Alert.AlertType.ERROR, "Error: " + ce.getMessage(), ButtonType.OK);
+                                    alert.setTitle("Channel Play Error");
+                                    alert.setHeaderText("Can't play channel");
+                                    alert.initOwner((getPlayButton()).getScene().getWindow());
+                                    alert.showAndWait();
+                                });
+                            }
+                        });
                     }
                     else
                     {
-                        try
-                        {
-                            if(modifiedProperty().get())
+                        ThreadPool.SCHEDULED.execute(() -> {
+                            try
                             {
-                                Alert alert = new Alert(Alert.AlertType.WARNING,
-                                    "Do you want to save these changes before play?", ButtonType.YES, ButtonType.NO);
-                                alert.setTitle("Channel Configuration Modified");
-                                alert.setHeaderText("Channel configuration has unsaved changes");
-                                alert.initOwner((getPlayButton()).getScene().getWindow());
-                                alert.showAndWait().ifPresent(buttonType -> {
-                                    if(buttonType == ButtonType.YES)
-                                    {
-                                        save();
-                                    }
+                                mPlaylistManager.getChannelProcessingManager().stop(getItem());
+                            }
+                            catch(ChannelException ce)
+                            {
+                                mLog.error("Error stopping channel [" + getItem().getName() + "] - " + ce.getMessage());
+
+                                Platform.runLater(() -> {
+                                    Alert alert = new Alert(Alert.AlertType.ERROR, "Error: " + ce.getMessage(), ButtonType.OK);
+                                    alert.setTitle("Channel Stop Error");
+                                    alert.setHeaderText("Can't stop channel");
+                                    alert.initOwner((getPlayButton()).getScene().getWindow());
+                                    alert.showAndWait();
                                 });
                             }
-                            mPlaylistManager.getChannelProcessingManager().start(getItem());
-                        }
-                        catch(ChannelException ce)
-                        {
-                            Alert alert = new Alert(Alert.AlertType.ERROR, "Error: " + ce.getMessage(), ButtonType.OK);
-                            alert.setTitle("Channel Play Error");
-                            alert.setHeaderText("Can't play channel");
-                            alert.initOwner((getPlayButton()).getScene().getWindow());
-                            alert.showAndWait();
-                        }
+                        });
                     }
                 }
             });
         }
 
         return mPlayButton;
+    }
+
+    /**
+     * Indicates if the decoder type for the channel configuration requires the JMBE library and if the
+     * application is not currently setup for the JMBE library.
+     */
+    private boolean requiresJmbeLibrarySetup()
+    {
+        return getItem() != null &&
+               getItem().getDecodeConfiguration().getDecoderType().providesMBEAudioFrames() &&
+               !mUserPreferences.getJmbeLibraryPreference().hasJmbeLibraryPath();
     }
 
     /**

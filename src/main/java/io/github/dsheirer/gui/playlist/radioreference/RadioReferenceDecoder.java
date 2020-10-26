@@ -24,14 +24,19 @@ import io.github.dsheirer.identifier.talkgroup.LTRTalkgroup;
 import io.github.dsheirer.identifier.talkgroup.TalkgroupIdentifier;
 import io.github.dsheirer.identifier.talkgroup.UnknownTalkgroupIdentifier;
 import io.github.dsheirer.module.decode.DecoderType;
+import io.github.dsheirer.module.decode.dmr.channel.TimeslotFrequency;
 import io.github.dsheirer.module.decode.mpt1327.identifier.MPT1327Talkgroup;
 import io.github.dsheirer.module.decode.p25.identifier.talkgroup.APCO25Talkgroup;
 import io.github.dsheirer.module.decode.passport.identifier.PassportTalkgroup;
 import io.github.dsheirer.preference.UserPreferences;
+import io.github.dsheirer.preference.identifier.talkgroup.LTRTalkgroupFormatter;
+import io.github.dsheirer.preference.identifier.talkgroup.MPT1327TalkgroupFormatter;
 import io.github.dsheirer.protocol.Protocol;
 import io.github.dsheirer.rrapi.type.Flavor;
 import io.github.dsheirer.rrapi.type.Site;
+import io.github.dsheirer.rrapi.type.SiteFrequency;
 import io.github.dsheirer.rrapi.type.System;
+import io.github.dsheirer.rrapi.type.SystemInformation;
 import io.github.dsheirer.rrapi.type.Tag;
 import io.github.dsheirer.rrapi.type.Talkgroup;
 import io.github.dsheirer.rrapi.type.Type;
@@ -40,6 +45,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -99,6 +105,30 @@ public class RadioReferenceDecoder
                 return MPT1327Talkgroup.encode(prefix, ident);
             default:
                 return talkgroup.getDecimalValue();
+        }
+    }
+
+    /**
+     * Converts the talkgroup value to the format used by radio reference
+     * @param value of the talkgroup
+     * @param protocol for the talkgroup
+     * @return radio reference formatted talkgroup
+     */
+    public static int convertToRadioReferenceTalkgroup(int value, Protocol protocol)
+    {
+        switch(protocol)
+        {
+            case LTR:
+                int area = LTRTalkgroupFormatter.getArea(value);
+                int home = LTRTalkgroupFormatter.getLcn(value);
+                int group = LTRTalkgroupFormatter.getTalkgroup(value);
+                return (area * 100000) + (home * 1000) + group;
+            case MPT1327:
+                int prefix = MPT1327TalkgroupFormatter.getPrefix(value);
+                int ident = MPT1327TalkgroupFormatter.getIdent(value);
+                return (prefix * 10000) + ident;
+            default:
+                return value;
         }
     }
 
@@ -178,7 +208,7 @@ public class RadioReferenceDecoder
     {
         List<Tag> tags = new ArrayList<>();
 
-        if(talkgroup.getTags() != null)
+        if(talkgroup != null && talkgroup.getTags() != null)
         {
             for(Tag tag: talkgroup.getTags())
             {
@@ -194,7 +224,25 @@ public class RadioReferenceDecoder
      */
     public Type getType(System system)
     {
-        return mTypeMap.get(system.getTypeId());
+        if(system != null)
+        {
+            return mTypeMap.get(system.getTypeId());
+        }
+
+        return null;
+    }
+
+    /**
+     * Provides the radio reference Type for the system information instance
+     */
+    public Type getType(SystemInformation systemInformation)
+    {
+        if(systemInformation != null)
+        {
+            return mTypeMap.get(systemInformation.getTypeId());
+        }
+
+        return null;
     }
 
     /**
@@ -202,7 +250,25 @@ public class RadioReferenceDecoder
      */
     public Flavor getFlavor(System system)
     {
-        return mFlavorMap.get(system.getFlavorId());
+        if(system != null)
+        {
+            return mFlavorMap.get(system.getFlavorId());
+        }
+
+        return null;
+    }
+
+    /**
+     * Provides the radio reference Flavor for the system information instance
+     */
+    public Flavor getFlavor(SystemInformation systemInformation)
+    {
+        if(systemInformation != null)
+        {
+            return mFlavorMap.get(systemInformation.getFlavorId());
+        }
+
+        return null;
     }
 
     /**
@@ -210,7 +276,12 @@ public class RadioReferenceDecoder
      */
     public Voice getVoice(System system)
     {
-        return mVoiceMap.get(system.getVoiceId());
+        if(system != null)
+        {
+            return mVoiceMap.get(system.getVoiceId());
+        }
+
+        return null;
     }
 
     /**
@@ -246,7 +317,79 @@ public class RadioReferenceDecoder
      */
     public boolean isLSM(Site site)
     {
-        return site != null && site.getModulation() != null && site.getModulation().contentEquals("LSM");
+        if(site != null)
+        {
+            if(site.getModulation() != null && site.getModulation().contentEquals("LSM"))
+            {
+                return true;
+            }
+            else if(site.getDescription() != null && site.getDescription().contains("Simulcast"))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Indicates if the specified site is a DMR Connect Plus site that has site frequencies that can be converted
+     * to timeslot frequencies
+     * @param systemInformation to determine the system type
+     * @param site containing site frequencies
+     */
+    public boolean hasTimeslotFrequencies(SystemInformation systemInformation, Site site)
+    {
+        Type type = getType(systemInformation);
+        Flavor flavor = getFlavor(systemInformation);
+        return type != null && flavor != null && type.getName().contains("DMR") && !site.getSiteFrequencies().isEmpty();
+    }
+
+    /**
+     * Creates a list of timeslot to frequency mappings from the radio reference site's list of site frequencies for a
+     * MotoTRBO Connect Plus site
+     * @param systemInformation to detect the system type (DMR) and flavor (Connect Plus).
+     * @param site containing 1 or more site frequencies
+     * @return list of timeslot frequency mappings or an empty list.
+     */
+    public List<TimeslotFrequency> getTimeslotFrequencies(SystemInformation systemInformation, Site site)
+    {
+        if(hasTimeslotFrequencies(systemInformation, site))
+        {
+            List<TimeslotFrequency> frequencies = new ArrayList<>();
+
+            for(SiteFrequency siteFrequency: site.getSiteFrequencies())
+            {
+                int lcn = siteFrequency.getLogicalChannelNumber();
+
+                if(siteFrequency.getChannelId() != null)
+                {
+                    try
+                    {
+                        lcn = Integer.parseInt(siteFrequency.getChannelId());
+                    }
+                    catch(Exception e)
+                    {
+                        //Do nothing, we couldn't parse the LSN from the channel ID value
+                    }
+                }
+
+                int lsn = (lcn - 1) * 2 + 1;
+                TimeslotFrequency timeslot1Frequency = new TimeslotFrequency();
+                timeslot1Frequency.setNumber(lsn);
+                timeslot1Frequency.setDownlinkFrequency((long)(siteFrequency.getFrequency() * 1E6));
+                frequencies.add(timeslot1Frequency);
+
+                TimeslotFrequency timeslot2Frequency = new TimeslotFrequency();
+                timeslot2Frequency.setNumber(lsn + 1);
+                timeslot2Frequency.setDownlinkFrequency((long)(siteFrequency.getFrequency() * 1E6));
+                frequencies.add(timeslot2Frequency);
+            }
+
+            return frequencies;
+        }
+
+        return Collections.emptyList();
     }
 
     /**
@@ -267,6 +410,8 @@ public class RadioReferenceDecoder
 
         switch(type.getName())
         {
+            case "DMR":
+                return Protocol.DMR;
             case "LTR":
                 if(flavor.getName().contentEquals("Standard") || flavor.getName().contentEquals("Net"))
                 {
@@ -288,7 +433,6 @@ public class RadioReferenceDecoder
                     return Protocol.APCO25;
                 }
                 break;
-            case "DMR":
             case "NXDN":
             case "EDACS":
             case "TETRA":
@@ -314,51 +458,55 @@ public class RadioReferenceDecoder
         Flavor flavor = getFlavor(system);
         Voice voice = getVoice(system);
 
-        switch(type.getName())
+        if(type != null && flavor != null && voice != null)
         {
-            case "LTR":
-                if(flavor.getName().contentEquals("Net"))
-                {
-                    return DecoderType.LTR_NET;
-                }
-                else if(flavor.getName().contentEquals("Passport"))
-                {
-                    return DecoderType.PASSPORT;
-                }
-                else
-                {
-                    return DecoderType.LTR;
-                }
-            case "MPT-1327":
-                return DecoderType.MPT1327;
-            case "Project 25":
-                if(flavor.getName().contentEquals("Phase II"))
-                {
-                    return DecoderType.P25_PHASE2;
-                }
-                else if(flavor.getName().contentEquals("Phase I"))
-                {
-                    return DecoderType.P25_PHASE1;
-                }
-                break;
-            case "Motorola":
-                if(voice.getName().contentEquals("Analog and APCO-25 Common Air Interface") ||
-                   voice.getName().contentEquals("APCO-25 Common Air Interface Exclusive"))
-                {
-                    return DecoderType.P25_PHASE1;
-                }
-                break;
-            case "DMR":
-            case "NXDN":
+            switch(type.getName())
+            {
+                case "DMR":
+                    return DecoderType.DMR;
+                case "LTR":
+                    if(flavor.getName().contentEquals("Net"))
+                    {
+                        return DecoderType.LTR_NET;
+                    }
+                    else if(flavor.getName().contentEquals("Passport"))
+                    {
+                        return DecoderType.PASSPORT;
+                    }
+                    else
+                    {
+                        return DecoderType.LTR;
+                    }
+                case "MPT-1327":
+                    return DecoderType.MPT1327;
+                case "Project 25":
+                    if(flavor.getName().contentEquals("Phase II"))
+                    {
+                        return DecoderType.P25_PHASE2;
+                    }
+                    else if(flavor.getName().contentEquals("Phase I"))
+                    {
+                        return DecoderType.P25_PHASE1;
+                    }
+                    break;
+                case "Motorola":
+                    if(voice.getName().contentEquals("Analog and APCO-25 Common Air Interface") ||
+                        voice.getName().contentEquals("APCO-25 Common Air Interface Exclusive"))
+                    {
+                        return DecoderType.P25_PHASE1;
+                    }
+                    break;
+                case "NXDN":
 
-            case "EDACS":
-            case "TETRA":
-            case "Midland CMS":
-            case "OpenSky":
-            case "iDEN":
-            case "SmarTrunk":
-            case "Other":
-            default:
+                case "EDACS":
+                case "TETRA":
+                case "Midland CMS":
+                case "OpenSky":
+                case "iDEN":
+                case "SmarTrunk":
+                case "Other":
+                default:
+            }
         }
 
         return null;

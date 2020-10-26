@@ -30,6 +30,7 @@ import io.github.dsheirer.module.decode.config.AuxDecodeConfiguration;
 import io.github.dsheirer.module.decode.config.DecodeConfiguration;
 import io.github.dsheirer.module.log.config.EventLogConfiguration;
 import io.github.dsheirer.playlist.PlaylistManager;
+import io.github.dsheirer.preference.UserPreferences;
 import io.github.dsheirer.record.RecorderType;
 import io.github.dsheirer.record.config.RecordConfiguration;
 import io.github.dsheirer.source.config.SourceConfiguration;
@@ -60,9 +61,9 @@ public class AMConfigurationEditor extends ChannelConfigurationEditor
      * Constructs an instance
      * @param playlistManager
      */
-    public AMConfigurationEditor(PlaylistManager playlistManager)
+    public AMConfigurationEditor(PlaylistManager playlistManager, UserPreferences userPreferences)
     {
-        super(playlistManager);
+        super(playlistManager, userPreferences);
         getTitledPanesBox().getChildren().add(getSourcePane());
         getTitledPanesBox().getChildren().add(getDecoderPane());
         getTitledPanesBox().getChildren().add(getRecordPane());
@@ -137,7 +138,7 @@ public class AMConfigurationEditor extends ChannelConfigurationEditor
     {
         if(mSourceConfigurationEditor == null)
         {
-            mSourceConfigurationEditor = new FrequencyEditor(getTunerModel(), false);
+            mSourceConfigurationEditor = new FrequencyEditor(getTunerModel());
 
             //Add a listener so that we can push change notifications up to this editor
             mSourceConfigurationEditor.modifiedProperty()

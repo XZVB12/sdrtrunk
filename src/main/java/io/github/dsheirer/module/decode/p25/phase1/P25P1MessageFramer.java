@@ -25,7 +25,6 @@ import io.github.dsheirer.alias.Alias;
 import io.github.dsheirer.alias.AliasList;
 import io.github.dsheirer.alias.AliasModel;
 import io.github.dsheirer.alias.id.record.Record;
-import io.github.dsheirer.alias.id.talkgroup.Talkgroup;
 import io.github.dsheirer.alias.id.talkgroup.TalkgroupRange;
 import io.github.dsheirer.bits.BitSetFullException;
 import io.github.dsheirer.bits.CorrectedBinaryMessage;
@@ -34,7 +33,6 @@ import io.github.dsheirer.dsp.psk.pll.IPhaseLockedLoop;
 import io.github.dsheirer.dsp.symbol.Dibit;
 import io.github.dsheirer.dsp.symbol.ISyncDetectListener;
 import io.github.dsheirer.message.IMessage;
-import io.github.dsheirer.message.IMessageProvider;
 import io.github.dsheirer.message.Message;
 import io.github.dsheirer.message.MessageProviderModule;
 import io.github.dsheirer.message.StuffBitsMessage;
@@ -42,23 +40,16 @@ import io.github.dsheirer.message.SyncLossMessage;
 import io.github.dsheirer.module.ProcessingChain;
 import io.github.dsheirer.module.decode.DecoderType;
 import io.github.dsheirer.module.decode.p25.audio.P25P1AudioModule;
-import io.github.dsheirer.module.decode.p25.audio.P25P2AudioModule;
 import io.github.dsheirer.module.decode.p25.phase1.message.P25Message;
 import io.github.dsheirer.module.decode.p25.phase1.message.P25MessageFactory;
 import io.github.dsheirer.module.decode.p25.phase1.message.pdu.PDUMessageFactory;
 import io.github.dsheirer.module.decode.p25.phase1.message.pdu.PDUSequence;
 import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.TSBKMessage;
 import io.github.dsheirer.module.decode.p25.phase1.message.tsbk.TSBKMessageFactory;
-import io.github.dsheirer.module.decode.p25.phase2.DecodeConfigP25Phase2;
-import io.github.dsheirer.module.decode.p25.phase2.P25P2DecoderState;
-import io.github.dsheirer.module.decode.p25.phase2.P25P2MessageFramer;
-import io.github.dsheirer.module.decode.p25.phase2.P25P2MessageProcessor;
-import io.github.dsheirer.module.decode.p25.phase2.enumeration.ScrambleParameters;
 import io.github.dsheirer.preference.UserPreferences;
 import io.github.dsheirer.protocol.Protocol;
 import io.github.dsheirer.record.AudioRecordingManager;
 import io.github.dsheirer.record.binary.BinaryReader;
-import io.github.dsheirer.sample.Broadcaster;
 import io.github.dsheirer.sample.Listener;
 import io.github.dsheirer.sample.buffer.ReusableByteBuffer;
 import org.slf4j.Logger;
@@ -201,6 +192,17 @@ public class P25P1MessageFramer implements Listener<Dibit>, IP25P1DataUnitDetect
             {
                 mBinaryMessage.add(dibit.getBit1());
                 mBinaryMessage.add(dibit.getBit2());
+                
+                if(mBinaryMessage.isFull())
+                {
+                    //TDU's have a trailing status symbol that has to be removed -- set flag to true to suppress it.
+                    if(mDataUnitID.hasTrailingStatusDibit())
+                    {
+                        mTrailingDibitsToSuppress = 1;
+                    }
+
+                    dispatchMessage();
+                }
             }
             catch(BitSetFullException bsfe)
             {
@@ -208,17 +210,6 @@ public class P25P1MessageFramer implements Listener<Dibit>, IP25P1DataUnitDetect
 
                 //Reset so that we can start over again
                 reset(0);
-            }
-
-            if(mBinaryMessage.isFull())
-            {
-                //TDU's have a trailing status symbol that has to be removed -- set flag to true to suppress it.
-                if(mDataUnitID.hasTrailingStatusDibit())
-                {
-                    mTrailingDibitsToSuppress = 1;
-                }
-
-                dispatchMessage();
             }
         }
         else
@@ -458,7 +449,7 @@ public class P25P1MessageFramer implements Listener<Dibit>, IP25P1DataUnitDetect
 
     public static void main(String[] args)
     {
-        Path directory = Paths.get("/home/denny/temp/Harris P25-2 Logs/bits");
+        Path directory = Paths.get("/media/denny/500G1EXT4/RadioRecordings/APCO25/Ken Noffsinger");
 //        Path directory = Paths.get("/media/denny/500G1EXT4/PBITRecordings");
 
         UserPreferences userPreferences = new UserPreferences();
@@ -472,18 +463,19 @@ public class P25P1MessageFramer implements Listener<Dibit>, IP25P1DataUnitDetect
         AudioRecordingManager recordingManager = new AudioRecordingManager(userPreferences);
         recordingManager.start();
         ProcessingChain processingChain = new ProcessingChain(channel, new AliasModel());
-
         processingChain.addAudioSegmentListener(recordingManager);
         processingChain.addModule(new P25P1DecoderState(channel));
         processingChain.addModule(new P25P1AudioModule(userPreferences, aliasList));
         MessageProviderModule messageProviderModule = new MessageProviderModule();
         processingChain.addModule(messageProviderModule);
 
+        mLog.info("Processing Directory: " + directory.toString());
+
         try(OutputStream logOutput = Files.newOutputStream(directory.resolve("log.txt")))
         {
             try
             {
-                DirectoryStream<Path> stream = Files.newDirectoryStream(directory, "*PHASE1_Hills*TRAFFIC.bits");
+                DirectoryStream<Path> stream = Files.newDirectoryStream(directory, "*.bits");
 
                 stream.forEach(new Consumer<Path>()
                                {
@@ -520,7 +512,11 @@ public class P25P1MessageFramer implements Listener<Dibit>, IP25P1DataUnitDetect
                                                    {
                                                        mLog.error("Error", ioe);
                                                    }
-                                                   mLog.debug(message.toString());
+
+                                                   if(!(message instanceof SyncLossMessage))
+                                                   {
+                                                       mLog.debug(message.toString());
+                                                   }
                                                }
                                            }
                                        });
@@ -550,5 +546,7 @@ public class P25P1MessageFramer implements Listener<Dibit>, IP25P1DataUnitDetect
         {
             mLog.error("Error", ioe);
         }
+
+        mLog.info("Finished!");
     }
 }

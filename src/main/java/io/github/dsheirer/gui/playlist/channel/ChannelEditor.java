@@ -22,13 +22,16 @@
 
 package io.github.dsheirer.gui.playlist.channel;
 
+import com.google.common.base.Joiner;
 import io.github.dsheirer.controller.channel.Channel;
 import io.github.dsheirer.module.decode.DecoderFactory;
 import io.github.dsheirer.module.decode.DecoderType;
 import io.github.dsheirer.playlist.PlaylistManager;
+import io.github.dsheirer.preference.UserPreferences;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.value.ObservableValue;
+import javafx.collections.ObservableList;
 import javafx.collections.transformation.FilteredList;
 import javafx.collections.transformation.SortedList;
 import javafx.geometry.Insets;
@@ -62,7 +65,9 @@ import org.controlsfx.control.textfield.TextFields;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Predicate;
@@ -74,6 +79,7 @@ public class ChannelEditor extends SplitPane
 {
     private final static Logger mLog = LoggerFactory.getLogger(ChannelEditor.class);
     private PlaylistManager mPlaylistManager;
+    private UserPreferences mUserPreferences;
     private TableView<Channel> mChannelTableView;
     private Label mPlaceholderLabel;
     private MenuButton mNewButton;
@@ -96,10 +102,11 @@ public class ChannelEditor extends SplitPane
      * Constructs an instance
      * @param playlistManager containing playlists and channel configurations
      */
-    public ChannelEditor(PlaylistManager playlistManager)
+    public ChannelEditor(PlaylistManager playlistManager, UserPreferences userPreferences)
     {
         mPlaylistManager = playlistManager;
-        mUnknownConfigurationEditor = new UnknownConfigurationEditor(mPlaylistManager);
+        mUserPreferences = userPreferences;
+        mUnknownConfigurationEditor = new UnknownConfigurationEditor(mPlaylistManager, userPreferences);
 
         HBox channelsBox = new HBox();
         channelsBox.setSpacing(10.0);
@@ -195,7 +202,8 @@ public class ChannelEditor extends SplitPane
 
                     if(editor == null)
                     {
-                        editor = ChannelConfigurationEditorFactory.getEditor(channelDecoderType, mPlaylistManager);
+                        editor = ChannelConfigurationEditorFactory.getEditor(channelDecoderType, mPlaylistManager,
+                            mUserPreferences);
 
                         if(editor != null)
                         {
@@ -231,6 +239,7 @@ public class ChannelEditor extends SplitPane
         {
             mViewSegmentedButton = new SegmentedButton(getAllToggleButton(), getPlayingToggleButton(),
                 getAutoStartToggleButton());
+            mViewSegmentedButton.getStyleClass().add(SegmentedButton.STYLE_CLASS_DARK);
             getAllToggleButton().setSelected(true);
             mViewSegmentedButton.getToggleGroup().selectedToggleProperty()
                 .addListener((observable, oldValue, newValue) -> {
@@ -439,12 +448,16 @@ public class ChannelEditor extends SplitPane
             nameColumn.setCellValueFactory(new PropertyValueFactory<>("name"));
             nameColumn.setPrefWidth(200);
 
+            TableColumn frequencyColumn = new TableColumn("Frequency");
+            frequencyColumn.setCellValueFactory(new FrequencyCellValueFactory());
+            frequencyColumn.setPrefWidth(100);
+
             TableColumn protocolColumn = new TableColumn("Protocol");
             protocolColumn.setCellValueFactory(new ProtocolCellValueFactory());
             protocolColumn.setPrefWidth(100);
 
-            mChannelTableView.getColumns().addAll(systemColumn, siteColumn, nameColumn, protocolColumn, playingColumn,
-                autoStartColumn);
+            mChannelTableView.getColumns().addAll(systemColumn, siteColumn, nameColumn, frequencyColumn, protocolColumn,
+                playingColumn, autoStartColumn);
             mChannelTableView.setPlaceholder(getPlaceholderLabel());
 
             //Sorting and filtering for the table
@@ -628,8 +641,41 @@ public class ChannelEditor extends SplitPane
         }
     }
 
+
     /**
-     * Filter predicate for a filterec channel list
+     * Channel tuner channel source frequencies value factory
+     */
+    public class FrequencyCellValueFactory implements Callback<TableColumn.CellDataFeatures<Channel, String>,
+        ObservableValue<String>>
+    {
+        private SimpleStringProperty mFrequency = new SimpleStringProperty();
+
+        @Override
+        public ObservableValue<String> call(TableColumn.CellDataFeatures<Channel, String> param)
+        {
+            ObservableList<Long> frequencies = param.getValue().getFrequencyList();
+
+            if(frequencies != null)
+            {
+                List<String> freqsMHz = new ArrayList<>();
+                for(Long frequency: frequencies)
+                {
+                    freqsMHz.add(String.valueOf(frequency / 1E6));
+                }
+
+                mFrequency.set(Joiner.on(", ").join(freqsMHz));
+            }
+            else
+            {
+                mFrequency.set(null);
+            }
+
+            return mFrequency;
+        }
+    }
+
+    /**
+     * Filter predicate for a filtered channel list
      */
     public static class ChannelListFilter implements Predicate<Channel>
     {

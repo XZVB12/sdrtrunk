@@ -43,6 +43,7 @@ import io.github.dsheirer.module.decode.event.DecodeEvent;
 import io.github.dsheirer.module.decode.event.DecodeEventType;
 import io.github.dsheirer.module.decode.ip.IPacket;
 import io.github.dsheirer.module.decode.ip.ars.ARSPacket;
+import io.github.dsheirer.module.decode.ip.cellocator.MCGPPacket;
 import io.github.dsheirer.module.decode.ip.ipv4.IPV4Packet;
 import io.github.dsheirer.module.decode.ip.udp.UDPPacket;
 import io.github.dsheirer.module.decode.p25.P25DecodeEvent;
@@ -822,15 +823,20 @@ public class P25P1DecoderState extends DecoderState implements IChannelEventList
         }
         else
         {
+            mCurrentCallEvent.setIdentifierCollection(getIdentifierCollection().copyOf());
+            mCurrentCallEvent.end(timestamp);
+            broadcast(mCurrentCallEvent);
+
             if(type == DecodeEventType.CALL_ENCRYPTED)
             {
                 mCurrentCallEvent.setEventDescription(type.toString());
                 mCurrentCallEvent.setDetails(details);
+                broadcast(new DecoderStateEvent(this, Event.CONTINUATION, State.ENCRYPTED));
             }
-            mCurrentCallEvent.setIdentifierCollection(getIdentifierCollection().copyOf());
-            mCurrentCallEvent.end(timestamp);
-            broadcast(mCurrentCallEvent);
-            broadcast(new DecoderStateEvent(this, Event.CONTINUATION, State.CALL));
+            else
+            {
+                broadcast(new DecoderStateEvent(this, Event.CONTINUATION, State.CALL));
+            }
         }
     }
 
@@ -935,6 +941,10 @@ public class P25P1DecoderState extends DecoderState implements IChannelEventList
                         ARSPacket arsPacket = (ARSPacket)udpPayload;
 
                         MutableIdentifierCollection ic = new MutableIdentifierCollection(getIdentifierCollection().getIdentifiers());
+                        for(Identifier identifier: packet.getIdentifiers())
+                        {
+                            ic.update(identifier);
+                        }
 
                         DecodeEvent packetEvent = P25DecodeEvent.builder(message.getTimestamp())
                             .channel(getCurrentChannel())
@@ -945,9 +955,32 @@ public class P25P1DecoderState extends DecoderState implements IChannelEventList
 
                         broadcast(packetEvent);
                     }
+                    else if(udpPayload instanceof MCGPPacket)
+                    {
+                        MCGPPacket mcgpPacket = (MCGPPacket)udpPayload;
+
+                        MutableIdentifierCollection ic = new MutableIdentifierCollection(getIdentifierCollection().getIdentifiers());
+                        for(Identifier identifier: packet.getIdentifiers())
+                        {
+                            ic.update(identifier);
+                        }
+
+                        DecodeEvent cellocatorEvent = P25DecodeEvent.builder(message.getTimestamp())
+                                .channel(getCurrentChannel())
+                                .eventDescription("Cellocator")
+                                .identifiers(ic)
+                                .details(mcgpPacket.toString() + " " + ipv4.toString())
+                                .build();
+
+                        broadcast(cellocatorEvent);
+                    }
                     else
                     {
                         MutableIdentifierCollection ic = new MutableIdentifierCollection(getIdentifierCollection().getIdentifiers());
+                        for(Identifier identifier: packet.getIdentifiers())
+                        {
+                            ic.update(identifier);
+                        }
 
                         DecodeEvent packetEvent = P25DecodeEvent.builder(message.getTimestamp())
                             .channel(getCurrentChannel())
@@ -2085,7 +2118,7 @@ public class P25P1DecoderState extends DecoderState implements IChannelEventList
     {
         switch(event.getEvent())
         {
-            case RESET:
+            case REQUEST_RESET:
                 resetState();
                 mNetworkConfigurationMonitor.reset();
                 break;

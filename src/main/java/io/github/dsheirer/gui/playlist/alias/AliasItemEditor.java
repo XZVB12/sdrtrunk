@@ -22,6 +22,7 @@
 
 package io.github.dsheirer.gui.playlist.alias;
 
+import com.google.common.collect.Ordering;
 import com.google.common.eventbus.Subscribe;
 import impl.org.controlsfx.autocompletion.AutoCompletionTextFieldBinding;
 import impl.org.controlsfx.autocompletion.SuggestionProvider;
@@ -47,7 +48,7 @@ import io.github.dsheirer.alias.id.talkgroup.Talkgroup;
 import io.github.dsheirer.alias.id.talkgroup.TalkgroupFormatter;
 import io.github.dsheirer.alias.id.talkgroup.TalkgroupRange;
 import io.github.dsheirer.alias.id.tone.TonesID;
-import io.github.dsheirer.audio.broadcast.BroadcastConfiguration;
+import io.github.dsheirer.audio.broadcast.ConfiguredBroadcast;
 import io.github.dsheirer.eventbus.MyEventBus;
 import io.github.dsheirer.gui.playlist.Editor;
 import io.github.dsheirer.gui.playlist.alias.action.ActionEditor;
@@ -62,11 +63,13 @@ import io.github.dsheirer.preference.PreferenceType;
 import io.github.dsheirer.preference.UserPreferences;
 import io.github.dsheirer.preference.identifier.IntegerFormat;
 import io.github.dsheirer.protocol.Protocol;
+import javafx.application.Platform;
 import javafx.beans.binding.Bindings;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import javafx.collections.FXCollections;
 import javafx.collections.ListChangeListener;
+import javafx.collections.transformation.SortedList;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.geometry.HPos;
@@ -88,8 +91,8 @@ import javafx.scene.control.ScrollPane;
 import javafx.scene.control.SeparatorMenuItem;
 import javafx.scene.control.TextField;
 import javafx.scene.control.TitledPane;
-import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
+import javafx.scene.layout.ColumnConstraints;
 import javafx.scene.layout.GridPane;
 import javafx.scene.layout.HBox;
 import javafx.scene.layout.Priority;
@@ -104,7 +107,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -167,10 +169,10 @@ public class AliasItemEditor extends Editor<Alias>
         mUserPreferences = userPreferences;
 
         //Listen for changes to the stream configurations and refresh the stream lists
-        mPlaylistManager.getBroadcastModel().getBroadcastConfigurations()
-            .addListener((ListChangeListener<BroadcastConfiguration>)c -> updateStreamViews());
+        mPlaylistManager.getBroadcastModel().getConfiguredBroadcasts()
+            .addListener((ListChangeListener<ConfiguredBroadcast>)c -> updateStreamViews());
 
-        MyEventBus.getEventBus().register(this);
+        MyEventBus.getGlobalEventBus().register(this);
 
         setMaxWidth(Double.MAX_VALUE);
 
@@ -250,7 +252,7 @@ public class AliasItemEditor extends Editor<Alias>
             String iconName = alias.getIconName();
             if(iconName != null)
             {
-                icon = mPlaylistManager.getIconManager().getModel().getIcon(iconName);
+                icon = mPlaylistManager.getIconModel().getIcon(iconName);
             }
             getIconNodeComboBox().getSelectionModel().select(icon);
 
@@ -328,17 +330,14 @@ public class AliasItemEditor extends Editor<Alias>
 
             if(alias != null)
             {
-                alias.setName(getNameField().getText());
-                alias.setGroup(getGroupField().getText());
                 alias.setRecordable(getRecordAudioToggleSwitch().isSelected());
                 alias.setColor(ColorUtil.toInteger(getColorPicker().getValue()));
-
-                boolean canMonitor = getMonitorAudioToggleSwitch().isSelected();
-                Integer priority = getMonitorPriorityComboBox().getSelectionModel().getSelectedItem();
 
                 Icon icon = getIconNodeComboBox().getSelectionModel().getSelectedItem();
                 alias.setIconName(icon != null ? icon.getName() : null);
 
+                boolean canMonitor = getMonitorAudioToggleSwitch().isSelected();
+                Integer priority = getMonitorPriorityComboBox().getSelectionModel().getSelectedItem();
                 if(canMonitor)
                 {
                     if(priority == null)
@@ -360,48 +359,14 @@ public class AliasItemEditor extends Editor<Alias>
                     alias.addAliasID(selected);
                 }
 
-                AliasList aliasList = mPlaylistManager.getAliasModel().getAliasList(alias.getAliasListName());
-                aliasList.removeAlias(alias);
-
-                //Cleanup any alias identifiers that are marked as overlapping.  To do this, we remove all of the
-                //affected aliases, reset all of the overlap flags, and then add the aliases back to the alias list.
-                Set<Alias> aliasesToReset = new HashSet<>();
-                for(AliasID aliasID: alias.getAliasIdentifiers())
-                {
-                    if(aliasID.overlapProperty().get())
-                    {
-                        aliasID.overlapProperty().set(false);
-                        List<Alias> overlapAliases = aliasList.getOverlappingAliases(alias, aliasID);
-                        aliasesToReset.addAll(overlapAliases);
-                    }
-                }
-
-                //Remove overlap aliases, reset them, and readd back to the alias list
-                for(Alias resetAlias: aliasesToReset)
-                {
-                    aliasList.removeAlias(resetAlias);
-                    for(AliasID aliasID: resetAlias.getAliasIdentifiers())
-                    {
-                        aliasID.setOverlap(false);
-                    }
-                }
-
                 //Remove and replace the remaining non-audio identifiers
                 alias.removeNonAudioIdentifiers();
 
                 for(AliasID aliasID: getIdentifiersList().getItems())
                 {
-                    aliasID.setOverlap(false);
                     //Create a copy of the identifier so that the alias and the editor don't have the same instance
                     alias.addAliasID(AliasFactory.copyOf(aliasID));
                 }
-
-                //Add the aliases back to the alias list
-                for(Alias resetAlias: aliasesToReset)
-                {
-                    aliasList.addAlias(resetAlias);
-                }
-                aliasList.addAlias(alias);
 
                 //Remove and replace alias actions
                 alias.removeAllActions();
@@ -409,7 +374,31 @@ public class AliasItemEditor extends Editor<Alias>
                 {
                     alias.addAliasAction(aliasAction);
                 }
+
+                //Hack: because we're using a sorted list for the alias editor, sometimes setting
+                //name and or group can cause list errors.  So, we wrap each of these in a try/catch
+                //block to mitigate the error and effect the changes.
+                try
+                {
+                    alias.setName(getNameField().getText());
+                }
+                catch(Exception e)
+                {
+                    mLog.error("Error while updating alias name.", e);
+                }
+
+                try
+                {
+                    alias.setGroup(getGroupField().getText());
+                }
+                catch(Exception e)
+                {
+                    mLog.error("Error while updating alias group value", e);
+                }
             }
+
+            AliasList aliasList = mPlaylistManager.getAliasModel().getAliasList(alias.getAliasListName());
+            aliasList.updateAlias(alias);
 
             //Reset the alias to refresh the editor.
             setItem(alias);
@@ -421,6 +410,7 @@ public class AliasItemEditor extends Editor<Alias>
     @Override
     public void dispose()
     {
+        MyEventBus.getGlobalEventBus().unregister(this);
     }
 
     private VBox getTitledPanesBox()
@@ -670,7 +660,7 @@ public class AliasItemEditor extends Editor<Alias>
 
                     if(selected != null)
                     {
-                        MyEventBus.getEventBus().post(new ViewAliasIdentifierRequest(selected));
+                        MyEventBus.getGlobalEventBus().post(new ViewAliasIdentifierRequest(selected));
                     }
                 }
             });
@@ -697,6 +687,12 @@ public class AliasItemEditor extends Editor<Alias>
             p25Menu.getItems().add(new AddUnitStatusItem());
             p25Menu.getItems().add(new SeparatorMenuItem());
             p25Menu.getItems().add(new AddTonesItem("Audio Tones (Phase 2 Only)"));
+
+            Menu dmrMenu = new ProtocolMenu(Protocol.DMR);
+            dmrMenu.getItems().add(new AddTalkgroupItem(Protocol.DMR));
+            dmrMenu.getItems().add(new AddTalkgroupRangeItem(Protocol.DMR));
+            dmrMenu.getItems().add(new AddRadioIdItem(Protocol.DMR));
+            dmrMenu.getItems().add(new AddRadioIdRangeItem(Protocol.DMR));
 
             Menu fleetsyncMenu = new ProtocolMenu(Protocol.FLEETSYNC);
             fleetsyncMenu.getItems().add(new AddTalkgroupItem(Protocol.FLEETSYNC));
@@ -726,8 +722,8 @@ public class AliasItemEditor extends Editor<Alias>
             Menu lojackMenu = new ProtocolMenu(Protocol.LOJACK);
             lojackMenu.getItems().add(new AddLojackItem());
 
-            mAddIdentifierButton.getItems().addAll(p25Menu, fleetsyncMenu, ltrMenu, mdcMenu, mptMenu, passportMenu,
-                taitMenu, new SeparatorMenuItem(), lojackMenu);
+            mAddIdentifierButton.getItems().addAll(p25Menu, dmrMenu, fleetsyncMenu, ltrMenu, mdcMenu, mptMenu,
+                passportMenu, taitMenu, new SeparatorMenuItem(), lojackMenu);
         }
 
         return mAddIdentifierButton;
@@ -798,28 +794,35 @@ public class AliasItemEditor extends Editor<Alias>
 
     private void updateStreamViews()
     {
-        getAvailableStreamsView().getItems().clear();
-        getSelectedStreamsView().getItems().clear();
-        getAvailableStreamsView().setDisable(getItem() == null);
-        getSelectedStreamsView().setDisable(getItem() == null);
-
-        if(getItem() != null)
+        Platform.runLater(new Runnable()
         {
-            List<String> availableStreams = mPlaylistManager.getBroadcastModel().getBroadcastConfigurationNames();
-
-            Set<BroadcastChannel> selectedChannels = getItem().getBroadcastChannels();
-
-            for(BroadcastChannel channel: selectedChannels)
+            @Override
+            public void run()
             {
-                if(availableStreams.contains(channel.getChannelName()))
+                getAvailableStreamsView().getItems().clear();
+                getSelectedStreamsView().getItems().clear();
+                getAvailableStreamsView().setDisable(getItem() == null);
+                getSelectedStreamsView().setDisable(getItem() == null);
+
+                if(getItem() != null)
                 {
-                    availableStreams.remove(channel.getChannelName());
+                    List<String> availableStreams = mPlaylistManager.getBroadcastModel().getBroadcastConfigurationNames();
+
+                    Set<BroadcastChannel> selectedChannels = getItem().getBroadcastChannels();
+
+                    for(BroadcastChannel channel: selectedChannels)
+                    {
+                        if(availableStreams.contains(channel.getChannelName()))
+                        {
+                            availableStreams.remove(channel.getChannelName());
+                        }
+                    }
+
+                    getSelectedStreamsView().getItems().addAll(selectedChannels);
+                    getAvailableStreamsView().getItems().addAll(availableStreams);
                 }
             }
-
-            getSelectedStreamsView().getItems().addAll(selectedChannels);
-            getAvailableStreamsView().getItems().addAll(availableStreams);
-        }
+        });
     }
 
     private ListView<String> getAvailableStreamsView()
@@ -1072,7 +1075,7 @@ public class AliasItemEditor extends Editor<Alias>
             mIconNodeComboBox = new ComboBox<>();
             mIconNodeComboBox.setMaxWidth(Double.MAX_VALUE);
             mIconNodeComboBox.setDisable(true);
-            mIconNodeComboBox.getItems().addAll(mPlaylistManager.getIconManager().getIcons());
+            mIconNodeComboBox.setItems(new SortedList(mPlaylistManager.getIconModel().iconsProperty(), Ordering.natural()));
             mIconNodeComboBox.setCellFactory(new IconCellFactory());
             mIconNodeComboBox.getSelectionModel().selectedItemProperty()
                     .addListener((observable, oldValue, newValue) -> modifiedProperty().set(true));
@@ -1587,6 +1590,15 @@ public class AliasItemEditor extends Editor<Alias>
         @Override
         public ListCell<Icon> call(ListView<Icon> param)
         {
+            Label iconLabel = new Label();
+            Label textLabel = new Label();
+            GridPane gridPane = new GridPane();
+            gridPane.setHgap(5);
+            GridPane.setHalignment(iconLabel, HPos.RIGHT);
+            gridPane.getColumnConstraints().add(new ColumnConstraints(50));
+            gridPane.add(iconLabel, 0, 0);
+            gridPane.add(textLabel,1,0);
+
             ListCell<Icon> cell = new ListCell<>()
             {
                 @Override
@@ -1601,22 +1613,9 @@ public class AliasItemEditor extends Editor<Alias>
                     }
                     else
                     {
-                        setText(item.getName());
-
-                        String path = item.getPath();
-
-                        if(path.startsWith("images"))
-                        {
-                            try
-                            {
-                                Image image = new Image(path, 0, 20, true, true);
-                                setGraphic(new ImageView(image));
-                            }
-                            catch(Exception e)
-                            {
-
-                            }
-                        }
+                        textLabel.setText(item.getName());
+                        iconLabel.setGraphic(new ImageView(item.getFxImage()));
+                        setGraphic(gridPane);
                     }
                 }
             };

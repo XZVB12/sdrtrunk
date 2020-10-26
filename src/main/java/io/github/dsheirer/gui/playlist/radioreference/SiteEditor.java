@@ -27,6 +27,8 @@ import io.github.dsheirer.gui.playlist.channel.ViewChannelRequest;
 import io.github.dsheirer.module.decode.DecoderFactory;
 import io.github.dsheirer.module.decode.DecoderType;
 import io.github.dsheirer.module.decode.config.DecodeConfiguration;
+import io.github.dsheirer.module.decode.dmr.DecodeConfigDMR;
+import io.github.dsheirer.module.decode.dmr.channel.TimeslotFrequency;
 import io.github.dsheirer.module.decode.p25.phase1.DecodeConfigP25Phase1;
 import io.github.dsheirer.module.decode.p25.phase1.P25P1Decoder;
 import io.github.dsheirer.module.decode.p25.phase2.DecodeConfigP25Phase2;
@@ -108,7 +110,7 @@ public class SiteEditor extends GridPane
     private CheckBox mGoToChannelEditorCheckBox;
     private Label mProtocolNotSupportedLabel;
     private RadioReferenceDecoder mRadioReferenceDecoder;
-    private Site mCurrentSite;
+    private EnrichedSite mCurrentSite;
     private System mCurrentSystem;
     private SystemInformation mCurrentSystemInformation;
     private ComboBox mAliasListNameComboBox;
@@ -222,6 +224,12 @@ public class SiteEditor extends GridPane
 
         switch(decoderType)
         {
+            case DMR:
+                DecodeConfigDMR dmr = new DecodeConfigDMR();
+                List<TimeslotFrequency> timeslotFrequencies = mRadioReferenceDecoder
+                    .getTimeslotFrequencies(systemInformation, site);
+                dmr.setTimeslotMap(timeslotFrequencies);
+                return dmr;
             case P25_PHASE1:
                 DecodeConfiguration p1config = DecoderFactory.getDecodeConfiguration(decoderType);
 
@@ -290,7 +298,8 @@ public class SiteEditor extends GridPane
         }
     }
 
-    public void setSite(Site site, System system, SystemInformation systemInformation, RadioReferenceDecoder decoder)
+
+    public void setSite(EnrichedSite site, System system, SystemInformation systemInformation, RadioReferenceDecoder decoder)
     {
         mCurrentSite = site;
         mCurrentSystem = system;
@@ -299,7 +308,7 @@ public class SiteEditor extends GridPane
 
         getSiteFrequencyTableView().getItems().clear();
 
-        boolean disable = site == null || site.getSiteFrequencies().isEmpty();
+        boolean disable = site == null || site.getSite().getSiteFrequencies().isEmpty();
         boolean supported = decoder.hasSupportedProtocol(system);
 
         getFrequenciesSegmentedButton().setDisable(disable || !supported);
@@ -318,7 +327,7 @@ public class SiteEditor extends GridPane
 
         if(site != null)
         {
-            List<SiteFrequency> siteFrequencies = site.getSiteFrequencies();
+            List<SiteFrequency> siteFrequencies = site.getSite().getSiteFrequencies();
             for(SiteFrequency siteFrequency: siteFrequencies)
             {
                 if(siteFrequency.getFrequency() > 0.01)
@@ -340,7 +349,7 @@ public class SiteEditor extends GridPane
                 getCreateChannelConfigurationButton().setVisible(true);
                 getGoToChannelEditorCheckBox().setVisible(true);
                 getSystemTextField().setText(system.getName());
-                getSiteTextField().setText(site.getCountyName());
+                getSiteTextField().setText(mCurrentSite.getCountyName());
                 getNameTextField().setText("Control");
 
                 if(!siteFrequencies.isEmpty())
@@ -456,7 +465,8 @@ public class SiteEditor extends GridPane
                 Channel channel = getChannelTemplate();
                 channel.setName("LCN " + siteFrequency.getLogicalChannelNumber());
                 DecoderType decoderType = mRadioReferenceDecoder.getDecoderType(mCurrentSystem);
-                channel.setDecodeConfiguration(getDecodeConfiguration(decoderType, mCurrentSite, mCurrentSystemInformation));
+                channel.setDecodeConfiguration(getDecodeConfiguration(decoderType, mCurrentSite.getSite(),
+                    mCurrentSystemInformation));
                 SourceConfigTuner sourceConfigTuner = new SourceConfigTuner();
                 sourceConfigTuner.setFrequency(getFrequency(siteFrequency));
                 channel.setSourceConfiguration(sourceConfigTuner);
@@ -472,26 +482,25 @@ public class SiteEditor extends GridPane
 
         if(getGoToChannelEditorCheckBox().isSelected() && gotoChannel != null)
         {
-            MyEventBus.getEventBus().post(new ViewChannelRequest(gotoChannel));
+            MyEventBus.getGlobalEventBus().post(new ViewChannelRequest(gotoChannel));
         }
     }
 
     private void createControlChannel()
     {
-        SiteFrequency control = null;
+        List<SiteFrequency> controls = new ArrayList<>();
 
         for(SiteFrequency siteFrequency: getSiteFrequencyTableView().getItems())
         {
             if(isControl(siteFrequency) && siteFrequency.getFrequency() > 0.01)
             {
-                control = siteFrequency;
-                continue;
+                controls.add(siteFrequency);
             }
         }
 
-        if(control == null)
+        if(controls.isEmpty())
         {
-            Alert alert = new Alert(Alert.AlertType.ERROR, "Site Has No Control Channel", ButtonType.OK);
+            Alert alert = new Alert(Alert.AlertType.ERROR, "Site Has No Control Channel(s)", ButtonType.OK);
             alert.setTitle("Create Channel Configuration");
             alert.setHeaderText("Can't Create Channel Configuration");
             alert.initOwner((getCreateChannelConfigurationButton()).getScene().getWindow());
@@ -511,16 +520,31 @@ public class SiteEditor extends GridPane
                 decoderType = DecoderType.P25_PHASE1;
             }
 
-            channel.setDecodeConfiguration(getDecodeConfiguration(decoderType, mCurrentSite, mCurrentSystemInformation));
+            channel.setDecodeConfiguration(getDecodeConfiguration(decoderType, mCurrentSite.getSite(), mCurrentSystemInformation));
 
-            SourceConfigTuner sourceConfigTuner = new SourceConfigTuner();
-            sourceConfigTuner.setFrequency((long)(control.getFrequency() * 1E6));
-            channel.setSourceConfiguration(sourceConfigTuner);
+            if(controls.size() == 1)
+            {
+                SourceConfigTuner sourceConfigTuner = new SourceConfigTuner();
+                sourceConfigTuner.setFrequency((long)(controls.get(0).getFrequency() * 1E6));
+                channel.setSourceConfiguration(sourceConfigTuner);
+            }
+            else
+            {
+                SourceConfigTunerMultipleFrequency sourceConfig = new SourceConfigTunerMultipleFrequency();
+
+                for(SiteFrequency control: controls)
+                {
+                    sourceConfig.addFrequency((long)(control.getFrequency() * 1E6));
+                }
+
+                channel.setSourceConfiguration(sourceConfig);
+            }
+
             mPlaylistManager.getChannelModel().addChannel(channel);
 
             if(getGoToChannelEditorCheckBox().isSelected())
             {
-                MyEventBus.getEventBus().post(new ViewChannelRequest(channel));
+                MyEventBus.getGlobalEventBus().post(new ViewChannelRequest(channel));
             }
         }
     }
@@ -547,7 +571,7 @@ public class SiteEditor extends GridPane
 
         if(siteFrequencies.isEmpty())
         {
-            Alert alert = new Alert(Alert.AlertType.ERROR, "Site Has No Control or Alternate Channels", ButtonType.OK);
+            Alert alert = new Alert(Alert.AlertType.ERROR, "Site Has No Control or Alternate Channel(s)", ButtonType.OK);
             alert.setTitle("Create Channel Configuration");
             alert.setHeaderText("Can't Create Channel Configuration");
             alert.initOwner((getCreateChannelConfigurationButton()).getScene().getWindow());
@@ -569,7 +593,8 @@ public class SiteEditor extends GridPane
                     decoderType = DecoderType.P25_PHASE1;
                 }
 
-                channel.setDecodeConfiguration(getDecodeConfiguration(decoderType, mCurrentSite, mCurrentSystemInformation));
+                channel.setDecodeConfiguration(getDecodeConfiguration(decoderType, mCurrentSite.getSite(),
+                    mCurrentSystemInformation));
 
                 if(siteFrequencies.size() == 1)
                 {
@@ -593,7 +618,7 @@ public class SiteEditor extends GridPane
 
                 if(getGoToChannelEditorCheckBox().isSelected())
                 {
-                    MyEventBus.getEventBus().post(new ViewChannelRequest(channel));
+                    MyEventBus.getGlobalEventBus().post(new ViewChannelRequest(channel));
                 }
             }
             else
@@ -605,7 +630,8 @@ public class SiteEditor extends GridPane
                     Channel channel = getChannelTemplate();
                     channel.setName("LCN " + siteFrequency.getLogicalChannelNumber());
                     DecoderType decoderType = mRadioReferenceDecoder.getDecoderType(mCurrentSystem);
-                    channel.setDecodeConfiguration(getDecodeConfiguration(decoderType, mCurrentSite, mCurrentSystemInformation));
+                    channel.setDecodeConfiguration(getDecodeConfiguration(decoderType, mCurrentSite.getSite(),
+                        mCurrentSystemInformation));
                     SourceConfigTuner sourceConfigTuner = new SourceConfigTuner();
                     sourceConfigTuner.setFrequency(getFrequency(siteFrequency));
                     channel.setSourceConfiguration(sourceConfigTuner);
@@ -620,7 +646,7 @@ public class SiteEditor extends GridPane
 
                 if(getGoToChannelEditorCheckBox().isSelected() && gotoChannel != null)
                 {
-                    MyEventBus.getEventBus().post(new ViewChannelRequest(gotoChannel));
+                    MyEventBus.getGlobalEventBus().post(new ViewChannelRequest(gotoChannel));
                 }
             }
         }
@@ -659,7 +685,8 @@ public class SiteEditor extends GridPane
                 Channel channel = getChannelTemplate();
 
                 DecoderType decoderType = mRadioReferenceDecoder.getDecoderType(mCurrentSystem);
-                channel.setDecodeConfiguration(getDecodeConfiguration(decoderType, mCurrentSite, mCurrentSystemInformation));
+                channel.setDecodeConfiguration(getDecodeConfiguration(decoderType, mCurrentSite.getSite(),
+                    mCurrentSystemInformation));
 
                 if(siteFrequencies.size() == 1)
                 {
@@ -683,7 +710,7 @@ public class SiteEditor extends GridPane
 
                 if(getGoToChannelEditorCheckBox().isSelected())
                 {
-                    MyEventBus.getEventBus().post(new ViewChannelRequest(channel));
+                    MyEventBus.getGlobalEventBus().post(new ViewChannelRequest(channel));
                 }
             }
             else
@@ -695,7 +722,8 @@ public class SiteEditor extends GridPane
                     Channel channel = getChannelTemplate();
                     channel.setName("LCN " + siteFrequency.getLogicalChannelNumber());
                     DecoderType decoderType = mRadioReferenceDecoder.getDecoderType(mCurrentSystem);
-                    channel.setDecodeConfiguration(getDecodeConfiguration(decoderType, mCurrentSite, mCurrentSystemInformation));
+                    channel.setDecodeConfiguration(getDecodeConfiguration(decoderType, mCurrentSite.getSite(),
+                        mCurrentSystemInformation));
 
                     SourceConfigTuner sourceConfigTuner = new SourceConfigTuner();
                     sourceConfigTuner.setFrequency(getFrequency(siteFrequency));
@@ -711,7 +739,7 @@ public class SiteEditor extends GridPane
 
                 if(getGoToChannelEditorCheckBox().isSelected() && gotoChannel != null)
                 {
-                    MyEventBus.getEventBus().post(new ViewChannelRequest(gotoChannel));
+                    MyEventBus.getGlobalEventBus().post(new ViewChannelRequest(gotoChannel));
                 }
             }
         }
@@ -804,6 +832,7 @@ public class SiteEditor extends GridPane
         if(mConfigurationsSegmentedButton == null)
         {
             mConfigurationsSegmentedButton = new SegmentedButton(getSingleToggleButton(), getForEachToggleButton());
+            mConfigurationsSegmentedButton.getStyleClass().add(SegmentedButton.STYLE_CLASS_DARK);
             mConfigurationsSegmentedButton.setDisable(true);
             mConfigurationsSegmentedButton.getToggleGroup().selectedToggleProperty()
                 .addListener((observable, oldValue, newValue) -> {
@@ -848,6 +877,7 @@ public class SiteEditor extends GridPane
         {
             mFrequenciesSegmentedButton = new SegmentedButton(getControlToggleButton(), getControlAndAltToggleButton(),
                 getSelectedToggleButton(), getAllToggleButton());
+            mFrequenciesSegmentedButton.getStyleClass().add(SegmentedButton.STYLE_CLASS_DARK);
             mFrequenciesSegmentedButton.setDisable(true);
             mFrequenciesSegmentedButton.getToggleGroup().selectedToggleProperty()
                 .addListener((observable, oldValue, newValue) -> {
@@ -944,7 +974,6 @@ public class SiteEditor extends GridPane
         {
             mSiteFrequencyTableView = new TableView<>();
             mSiteFrequencyTableView.getSelectionModel().setSelectionMode(SelectionMode.MULTIPLE);
-            mSiteFrequencyTableView.setMaxHeight(Double.MAX_VALUE);
             mSiteFrequencyTableView.setPlaceholder(new Label("Please select a site to view frequencies"));
 
             mTypeColumn = new TableColumn("Type");

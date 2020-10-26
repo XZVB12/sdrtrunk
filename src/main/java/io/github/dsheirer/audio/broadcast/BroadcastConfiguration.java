@@ -26,11 +26,11 @@ import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlProperty;
 import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement;
+import io.github.dsheirer.audio.broadcast.broadcastify.BroadcastifyCallConfiguration;
 import io.github.dsheirer.audio.broadcast.icecast.IcecastConfiguration;
 import io.github.dsheirer.audio.broadcast.shoutcast.v1.ShoutcastV1Configuration;
 import io.github.dsheirer.audio.broadcast.shoutcast.v2.ShoutcastV2Configuration;
 import javafx.beans.Observable;
-import javafx.beans.binding.Bindings;
 import javafx.beans.property.BooleanProperty;
 import javafx.beans.property.IntegerProperty;
 import javafx.beans.property.LongProperty;
@@ -40,12 +40,15 @@ import javafx.beans.property.SimpleLongProperty;
 import javafx.beans.property.SimpleStringProperty;
 import javafx.beans.property.StringProperty;
 import javafx.util.Callback;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, include = JsonTypeInfo.As.PROPERTY, property = "type")
 @JsonSubTypes({
+    @JsonSubTypes.Type(value = BroadcastifyCallConfiguration.class, name="broadcastifyCallConfiguration"),
     @JsonSubTypes.Type(value = IcecastConfiguration.class, name="icecastConfiguration"),
     @JsonSubTypes.Type(value = ShoutcastV1Configuration.class, name="shoutcastV1Configuration"),
     @JsonSubTypes.Type(value = ShoutcastV2Configuration.class, name="shoutcastV2Configuration"),
@@ -53,18 +56,19 @@ import java.net.SocketAddress;
 @JacksonXmlRootElement(localName = "stream")
 public abstract class BroadcastConfiguration
 {
+    private final static Logger mLog = LoggerFactory.getLogger(BroadcastConfiguration.class);
     // Static unique channel identifier tracking
     private static int UNIQUE_ID = 0;
 
     private BroadcastFormat mBroadcastFormat = BroadcastFormat.MP3;
-    private StringProperty mName = new SimpleStringProperty();
-    private StringProperty mHost = new SimpleStringProperty();
-    private IntegerProperty mPort = new SimpleIntegerProperty(80);
-    private StringProperty mPassword = new SimpleStringProperty();
-    private LongProperty mDelay = new SimpleLongProperty();
-    private LongProperty mMaximumRecordingAge = new SimpleLongProperty(10 * 60 * 1000); //10 minutes default
-    private BooleanProperty mEnabled = new SimpleBooleanProperty(false);
-    private BooleanProperty mValid;
+    protected StringProperty mName = new SimpleStringProperty();
+    protected StringProperty mHost = new SimpleStringProperty();
+    protected IntegerProperty mPort = new SimpleIntegerProperty(80);
+    protected StringProperty mPassword = new SimpleStringProperty();
+    protected LongProperty mDelay = new SimpleLongProperty();
+    protected LongProperty mMaximumRecordingAge = new SimpleLongProperty(10 * 60 * 1000); //10 minutes default
+    protected BooleanProperty mEnabled = new SimpleBooleanProperty(false);
+    protected BooleanProperty mValid = new SimpleBooleanProperty();
     private int mId = ++UNIQUE_ID;
 
     public BroadcastConfiguration()
@@ -155,12 +159,6 @@ public abstract class BroadcastConfiguration
      */
     public BooleanProperty validProperty()
     {
-        if(mValid == null)
-        {
-            mValid = new SimpleBooleanProperty();
-            mValid.bind(Bindings.and(Bindings.isNotNull(mHost), Bindings.greaterThan(mPort, 0)));
-        }
-
         return mValid;
     }
 
@@ -400,7 +398,7 @@ public abstract class BroadcastConfiguration
     @JsonIgnore
     public boolean isValid()
     {
-        return validProperty().get();
+        return mValid.get();
     }
 
     /**

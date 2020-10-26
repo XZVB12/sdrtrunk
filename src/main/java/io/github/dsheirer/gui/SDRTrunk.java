@@ -21,6 +21,7 @@ package io.github.dsheirer.gui;
 import com.jidesoft.plaf.LookAndFeelFactory;
 import com.jidesoft.swing.JideSplitPane;
 import io.github.dsheirer.alias.AliasModel;
+import io.github.dsheirer.audio.DuplicateCallDetector;
 import io.github.dsheirer.audio.broadcast.AudioStreamingManager;
 import io.github.dsheirer.audio.broadcast.BroadcastFormat;
 import io.github.dsheirer.audio.broadcast.BroadcastStatusPanel;
@@ -30,9 +31,10 @@ import io.github.dsheirer.controller.channel.Channel;
 import io.github.dsheirer.controller.channel.ChannelAutoStartFrame;
 import io.github.dsheirer.controller.channel.ChannelSelectionManager;
 import io.github.dsheirer.eventbus.MyEventBus;
+import io.github.dsheirer.gui.icon.ViewIconManagerRequest;
 import io.github.dsheirer.gui.playlist.ViewPlaylistRequest;
-import io.github.dsheirer.gui.preference.UserPreferenceEditorViewRequest;
-import io.github.dsheirer.icon.IconManager;
+import io.github.dsheirer.gui.preference.ViewUserPreferenceEditorRequest;
+import io.github.dsheirer.icon.IconModel;
 import io.github.dsheirer.log.ApplicationLog;
 import io.github.dsheirer.map.MapService;
 import io.github.dsheirer.module.log.EventLogManager;
@@ -106,7 +108,7 @@ public class SDRTrunk implements Listener<TunerEvent>
     private AudioStreamingManager mAudioStreamingManager;
     private BroadcastStatusPanel mBroadcastStatusPanel;
     private ControllerPanel mControllerPanel;
-    private IconManager mIconManager = new IconManager();
+    private IconModel mIconModel = new IconModel();
     private PlaylistManager mPlaylistManager;
     private SourceManager mSourceManager;
     private SettingsManager mSettingsManager;
@@ -166,7 +168,7 @@ public class SDRTrunk implements Listener<TunerEvent>
 
         AliasModel aliasModel = new AliasModel();
         EventLogManager eventLogManager = new EventLogManager(aliasModel, mUserPreferences);
-        mPlaylistManager = new PlaylistManager(mUserPreferences, mSourceManager, aliasModel, eventLogManager, mIconManager);
+        mPlaylistManager = new PlaylistManager(mUserPreferences, mSourceManager, aliasModel, eventLogManager, mIconModel);
         mJavaFxWindowManager = new JavaFxWindowManager(mUserPreferences, mPlaylistManager);
         new ChannelSelectionManager(mPlaylistManager.getChannelModel());
 
@@ -179,14 +181,17 @@ public class SDRTrunk implements Listener<TunerEvent>
             mUserPreferences);
         mAudioStreamingManager.start();
 
+        DuplicateCallDetector duplicateCallDetector = new DuplicateCallDetector(mUserPreferences);
+
+        mPlaylistManager.getChannelProcessingManager().addAudioSegmentListener(duplicateCallDetector);
         mPlaylistManager.getChannelProcessingManager().addAudioSegmentListener(audioPlaybackManager);
         mPlaylistManager.getChannelProcessingManager().addAudioSegmentListener(mAudioRecordingManager);
         mPlaylistManager.getChannelProcessingManager().addAudioSegmentListener(mAudioStreamingManager);
 
-        MapService mapService = new MapService(mIconManager);
+        MapService mapService = new MapService(mIconModel);
         mPlaylistManager.getChannelProcessingManager().addDecodeEventListener(mapService);
 
-        mControllerPanel = new ControllerPanel(mPlaylistManager, audioPlaybackManager, mIconManager, mapService,
+        mControllerPanel = new ControllerPanel(mPlaylistManager, audioPlaybackManager, mIconModel, mapService,
             mSettingsManager, mSourceManager, mUserPreferences);
 
         mSpectralPanel = new SpectralDisplayPanel(mPlaylistManager, mSettingsManager, tunerModel);
@@ -280,6 +285,11 @@ public class SDRTrunk implements Listener<TunerEvent>
             }
 
             mMainGui.setSize(dimension);
+
+            if(mUserPreferences.getSwingPreference().getMaximized(WINDOW_FRAME_IDENTIFIER, false))
+            {
+                mMainGui.setExtendedState(JFrame.MAXIMIZED_BOTH);
+            }
         }
         else
         {
@@ -327,15 +337,15 @@ public class SDRTrunk implements Listener<TunerEvent>
         JMenu viewMenu = new JMenu("View");
 
         JMenuItem viewPlaylistItem = new JMenuItem("Playlist Editor");
-        viewPlaylistItem.addActionListener(e -> MyEventBus.getEventBus().post(new ViewPlaylistRequest()));
+        viewPlaylistItem.addActionListener(e -> MyEventBus.getGlobalEventBus().post(new ViewPlaylistRequest()));
         viewMenu.add(viewPlaylistItem);
 
         JMenuItem preferencesItem = new JMenuItem("User Preferences");
-        preferencesItem.addActionListener(e -> MyEventBus.getEventBus().post(new UserPreferenceEditorViewRequest()));
+        preferencesItem.addActionListener(e -> MyEventBus.getGlobalEventBus().post(new ViewUserPreferenceEditorRequest()));
         viewMenu.add(preferencesItem);
 
         JMenuItem settingsMenu = new JMenuItem("Icon Manager");
-        settingsMenu.addActionListener(arg0 -> mIconManager.showEditor(mMainGui));
+        settingsMenu.addActionListener(arg0 -> MyEventBus.getGlobalEventBus().post(new ViewIconManagerRequest()));
         viewMenu.add(settingsMenu);
 
         JMenuItem logFilesMenu = new JMenuItem("Logs & Recordings");
@@ -371,41 +381,34 @@ public class SDRTrunk implements Listener<TunerEvent>
         menuBar.add(viewMenu);
 
         JMenuItem screenCaptureItem = new JMenuItem("Screen Capture");
-
         screenCaptureItem.setMnemonic(KeyEvent.VK_C);
-        screenCaptureItem.setAccelerator(
-            KeyStroke.getKeyStroke(KeyEvent.VK_C, ActionEvent.ALT_MASK));
-
-        screenCaptureItem.addActionListener(new ActionListener()
-        {
-            @Override
-            public void actionPerformed(ActionEvent arg0)
+        screenCaptureItem.setAccelerator(KeyStroke.getKeyStroke(KeyEvent.VK_C, ActionEvent.ALT_MASK));
+        screenCaptureItem.setMaximumSize(screenCaptureItem.getPreferredSize());
+        screenCaptureItem.addActionListener(arg0 -> {
+            try
             {
-                try
-                {
-                    Robot robot = new Robot();
+                Robot robot = new Robot();
 
-                    final BufferedImage image = robot.createScreenCapture(mMainGui.getBounds());
+                final BufferedImage image = robot.createScreenCapture(mMainGui.getBounds());
 
-                    String filename = TimeStamp.getTimeStamp("_") + "_screen_capture.png";
+                String filename = TimeStamp.getTimeStamp("_") + "_screen_capture.png";
 
-                    final Path captureFile = mUserPreferences.getDirectoryPreference().getDirectoryScreenCapture().resolve(filename);
+                final Path captureFile = mUserPreferences.getDirectoryPreference().getDirectoryScreenCapture().resolve(filename);
 
-                    EventQueue.invokeLater(() -> {
-                        try
-                        {
-                            ImageIO.write(image, "png", captureFile.toFile());
-                        }
-                        catch(IOException e)
-                        {
-                            mLog.error("Couldn't write screen capture to file [" + captureFile.toString() + "]", e);
-                        }
-                    });
-                }
-                catch(AWTException e)
-                {
-                    mLog.error("Exception while taking screen capture", e);
-                }
+                EventQueue.invokeLater(() -> {
+                    try
+                    {
+                        ImageIO.write(image, "png", captureFile.toFile());
+                    }
+                    catch(IOException e)
+                    {
+                        mLog.error("Couldn't write screen capture to file [" + captureFile.toString() + "]", e);
+                    }
+                });
+            }
+            catch(AWTException e)
+            {
+                mLog.error("Exception while taking screen capture", e);
             }
         });
 
@@ -420,6 +423,8 @@ public class SDRTrunk implements Listener<TunerEvent>
         mLog.info("Application shutdown started ...");
         mUserPreferences.getSwingPreference().setLocation(WINDOW_FRAME_IDENTIFIER, mMainGui.getLocation());
         mUserPreferences.getSwingPreference().setDimension(WINDOW_FRAME_IDENTIFIER, mMainGui.getSize());
+        mUserPreferences.getSwingPreference().setMaximized(WINDOW_FRAME_IDENTIFIER,
+            (mMainGui.getExtendedState() & JFrame.MAXIMIZED_BOTH) == JFrame.MAXIMIZED_BOTH);
         mUserPreferences.getSwingPreference().setDimension(SPECTRAL_PANEL_IDENTIFIER, mSpectralPanel.getSize());
         mUserPreferences.getSwingPreference().setDimension(CONTROLLER_PANEL_IDENTIFIER, mControllerPanel.getSize());
         mJavaFxWindowManager.shutdown();

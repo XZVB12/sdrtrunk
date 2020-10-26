@@ -29,7 +29,7 @@ public enum PreferenceEditorType
     JMBE_LIBRARY("JMBE Audio Library"),
     AUDIO_RECORD("Record"),
     AUDIO_OUTPUT("Output/Tones"),
-    SOURCE_CHANNEL_MULTIPLE_FREQUENCY("Channel - Multiple Frequency"),
+    AUDIO_DUPLICATE_CALL_DETECTION("Duplicate Calls"),
     SOURCE_TUNER_CHANNELIZER("Tuner Channelizer"),
     TALKGROUP_FORMAT("Talkgroup & Radio ID"),
     DEFAULT("Default");

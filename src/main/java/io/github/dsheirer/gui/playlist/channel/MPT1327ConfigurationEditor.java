@@ -24,7 +24,7 @@ package io.github.dsheirer.gui.playlist.channel;
 
 import io.github.dsheirer.controller.channel.map.ChannelMap;
 import io.github.dsheirer.eventbus.MyEventBus;
-import io.github.dsheirer.gui.playlist.channelMap.ChannelMapEditorViewRequest;
+import io.github.dsheirer.gui.playlist.channelMap.ViewChannelMapEditorRequest;
 import io.github.dsheirer.gui.playlist.eventlog.EventLogConfigurationEditor;
 import io.github.dsheirer.gui.playlist.record.RecordConfigurationEditor;
 import io.github.dsheirer.gui.playlist.source.FrequencyEditor;
@@ -36,6 +36,7 @@ import io.github.dsheirer.module.decode.mpt1327.DecodeConfigMPT1327;
 import io.github.dsheirer.module.log.EventLogType;
 import io.github.dsheirer.module.log.config.EventLogConfiguration;
 import io.github.dsheirer.playlist.PlaylistManager;
+import io.github.dsheirer.preference.UserPreferences;
 import io.github.dsheirer.record.RecorderType;
 import io.github.dsheirer.record.config.RecordConfiguration;
 import io.github.dsheirer.source.config.SourceConfiguration;
@@ -60,6 +61,9 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 
+import static io.github.dsheirer.module.decode.config.DecodeConfiguration.CALL_TIMEOUT_MAXIMUM;
+import static io.github.dsheirer.module.decode.config.DecodeConfiguration.CALL_TIMEOUT_MINIMUM;
+
 /**
  * MPT-1327 channel configuration editor
  */
@@ -81,10 +85,11 @@ public class MPT1327ConfigurationEditor extends ChannelConfigurationEditor
     /**
      * Constructs an instance
      * @param playlistManager
+     * @param userPreferences
      */
-    public MPT1327ConfigurationEditor(PlaylistManager playlistManager)
+    public MPT1327ConfigurationEditor(PlaylistManager playlistManager, UserPreferences userPreferences)
     {
-        super(playlistManager);
+        super(playlistManager, userPreferences);
         getTitledPanesBox().getChildren().add(getSourcePane());
         getTitledPanesBox().getChildren().add(getDecoderPane());
         getTitledPanesBox().getChildren().add(getEventLogPane());
@@ -190,7 +195,10 @@ public class MPT1327ConfigurationEditor extends ChannelConfigurationEditor
     {
         if(mSourceConfigurationEditor == null)
         {
-            mSourceConfigurationEditor = new FrequencyEditor(getTunerModel(), true);
+            mSourceConfigurationEditor = new FrequencyEditor(getTunerModel(),
+                DecodeConfigMPT1327.CHANNEL_ROTATION_DELAY_MINIMUM_MS,
+                DecodeConfigMPT1327.CHANNEL_ROTATION_DELAY_MAXIMUM_MS,
+                DecodeConfigMPT1327.CHANNEL_ROTATION_DELAY_DEFAULT_MS);
 
             //Add a listener so that we can push change notifications up to this editor
             mSourceConfigurationEditor.modifiedProperty()
@@ -244,7 +252,7 @@ public class MPT1327ConfigurationEditor extends ChannelConfigurationEditor
             mChannelMapComboBox.setMaxWidth(Double.MAX_VALUE);
             mChannelMapComboBox.setDisable(true);
             mChannelMapComboBox.setTooltip(new Tooltip("Select a channel map to use for this system"));
-            mChannelMapComboBox.getItems().addAll(getPlaylistManager().getChannelMapModel().getChannelMaps());
+            mChannelMapComboBox.setItems(getPlaylistManager().getChannelMapModel().getChannelMaps());
             mChannelMapComboBox.setDisable(true);
             mChannelMapComboBox.getSelectionModel().selectedItemProperty()
                 .addListener((observable, oldValue, newValue) -> modifiedProperty().set(true));
@@ -271,7 +279,7 @@ public class MPT1327ConfigurationEditor extends ChannelConfigurationEditor
                         channelMapName = getChannelMapComboBox().getSelectionModel().getSelectedItem().getName();
                     }
 
-                    MyEventBus.getEventBus().post(new ChannelMapEditorViewRequest(channelMapName));
+                    MyEventBus.getGlobalEventBus().post(new ViewChannelMapEditorRequest(channelMapName));
                 }
             });
         }
@@ -301,11 +309,11 @@ public class MPT1327ConfigurationEditor extends ChannelConfigurationEditor
     {
         if(mCallTimeoutSpinner == null)
         {
-            mCallTimeoutSpinner = new Spinner();
+            mCallTimeoutSpinner = new Spinner<>();
             mCallTimeoutSpinner.setDisable(true);
             mCallTimeoutSpinner.setTooltip(new Tooltip("Maximum call limit in seconds"));
             mCallTimeoutSpinner.getStyleClass().add(Spinner.STYLE_CLASS_SPLIT_ARROWS_HORIZONTAL);
-            SpinnerValueFactory<Integer> svf = new SpinnerValueFactory.IntegerSpinnerValueFactory(1, 120);
+            var svf = new SpinnerValueFactory.IntegerSpinnerValueFactory(CALL_TIMEOUT_MINIMUM, CALL_TIMEOUT_MAXIMUM);
             mCallTimeoutSpinner.setValueFactory(svf);
             mCallTimeoutSpinner.getValueFactory().valueProperty()
                 .addListener((observable, oldValue, newValue) -> modifiedProperty().set(true));
@@ -340,7 +348,7 @@ public class MPT1327ConfigurationEditor extends ChannelConfigurationEditor
                 }
             }
 
-            int callTimeout = decodeConfigMPT1327.getCallTimeout();
+            int callTimeout = decodeConfigMPT1327.getCallTimeoutSeconds();
             getCallTimeoutSpinner().getValueFactory().setValue(callTimeout);
 
             int channelPoolSize = decodeConfigMPT1327.getTrafficChannelPoolSize();
@@ -367,7 +375,7 @@ public class MPT1327ConfigurationEditor extends ChannelConfigurationEditor
             config = new DecodeConfigMPT1327();
         }
 
-        config.setCallTimeout(getCallTimeoutSpinner().getValue());
+        config.setCallTimeoutSeconds(getCallTimeoutSpinner().getValue());
         config.setTrafficChannelPoolSize(getTrafficChannelPoolSizeSpinner().getValue());
 
         ChannelMap selected = getChannelMapComboBox().getSelectionModel().getSelectedItem();

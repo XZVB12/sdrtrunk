@@ -45,8 +45,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.EnumMap;
-import java.util.HashMap;
-import java.util.ListIterator;
 import java.util.Map;
 
 /**
@@ -94,7 +92,7 @@ public class UserPreferencesEditor extends BorderPane
     /**
      * Shows the editor specified in the request by scrolling the editor view tree to the selected item.
      */
-    public void process(UserPreferenceEditorViewRequest request)
+    public void process(ViewUserPreferenceEditorRequest request)
     {
         if(request.getPreferenceType() != null)
         {
@@ -169,6 +167,7 @@ public class UserPreferencesEditor extends BorderPane
             TreeItem<String> treeRoot = new TreeItem<>("Root node");
 
             TreeItem<String> audioItem = new TreeItem<>("Audio");
+            audioItem.getChildren().add(new TreeItem(PreferenceEditorType.AUDIO_DUPLICATE_CALL_DETECTION));
             audioItem.getChildren().add(new TreeItem(PreferenceEditorType.AUDIO_OUTPUT));
             audioItem.getChildren().add(new TreeItem(PreferenceEditorType.AUDIO_RECORD));
             treeRoot.getChildren().add(audioItem);
@@ -191,7 +190,6 @@ public class UserPreferencesEditor extends BorderPane
             storageItem.setExpanded(true);
 
             TreeItem<String> sourceItem = new TreeItem<>("Source");
-            sourceItem.getChildren().add(new TreeItem(PreferenceEditorType.SOURCE_CHANNEL_MULTIPLE_FREQUENCY));
             sourceItem.getChildren().add(new TreeItem(PreferenceEditorType.SOURCE_TUNER_CHANNELIZER));
             treeRoot.getChildren().add(sourceItem);
             sourceItem.setExpanded(true);
@@ -248,7 +246,7 @@ public class UserPreferencesEditor extends BorderPane
 
             Menu viewMenu = new Menu("View");
             MenuItem playlistEditorItem = new MenuItem("Playlist Editor");
-            playlistEditorItem.setOnAction(event -> MyEventBus.getEventBus().post(new ViewPlaylistRequest()));
+            playlistEditorItem.setOnAction(event -> MyEventBus.getGlobalEventBus().post(new ViewPlaylistRequest()));
             viewMenu.getItems().add(playlistEditorItem);
             mMenuBar.getMenus().add(viewMenu);
         }

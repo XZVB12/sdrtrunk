@@ -21,18 +21,21 @@
  */
 package io.github.dsheirer.playlist;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.dataformat.xml.JacksonXmlModule;
 import com.fasterxml.jackson.dataformat.xml.XmlMapper;
+import io.github.dsheirer.alias.Alias;
 import io.github.dsheirer.alias.AliasModel;
 import io.github.dsheirer.audio.broadcast.BroadcastModel;
 import io.github.dsheirer.controller.channel.Channel.ChannelType;
 import io.github.dsheirer.controller.channel.ChannelEvent;
 import io.github.dsheirer.controller.channel.ChannelModel;
 import io.github.dsheirer.controller.channel.ChannelProcessingManager;
+import io.github.dsheirer.controller.channel.map.ChannelMap;
 import io.github.dsheirer.controller.channel.map.ChannelMapModel;
-import io.github.dsheirer.icon.IconManager;
+import io.github.dsheirer.icon.IconModel;
 import io.github.dsheirer.module.log.EventLogManager;
 import io.github.dsheirer.preference.UserPreferences;
 import io.github.dsheirer.preference.playlist.PlaylistPreference;
@@ -41,6 +44,7 @@ import io.github.dsheirer.service.radioreference.RadioReference;
 import io.github.dsheirer.source.SourceManager;
 import io.github.dsheirer.source.tuner.TunerModel;
 import io.github.dsheirer.util.ThreadPool;
+import javafx.collections.ListChangeListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -50,6 +54,7 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -65,7 +70,7 @@ public class PlaylistManager implements Listener<ChannelEvent>
 
     private AliasModel mAliasModel;
     private ChannelMapModel mChannelMapModel = new ChannelMapModel();
-    private IconManager mIconManager;
+    private IconModel mIconModel;
 
     private BroadcastModel mBroadcastModel;
     private ChannelModel mChannelModel;
@@ -88,14 +93,14 @@ public class PlaylistManager implements Listener<ChannelEvent>
      * @param eventLogManager for event logging
      */
     public PlaylistManager(UserPreferences userPreferences, SourceManager sourceManager, AliasModel aliasModel,
-                           EventLogManager eventLogManager, IconManager iconManager)
+                           EventLogManager eventLogManager, IconModel iconModel)
     {
         mUserPreferences = userPreferences;
         mSourceManager = sourceManager;
         mAliasModel = aliasModel;
-        mIconManager = iconManager;
+        mIconModel = iconModel;
 
-        mBroadcastModel = new BroadcastModel(mAliasModel, mIconManager, userPreferences);
+        mBroadcastModel = new BroadcastModel(mAliasModel, mIconModel, userPreferences);
         mRadioReference = new RadioReference(mUserPreferences);
 
         mChannelModel = new ChannelModel(mAliasModel);
@@ -108,15 +113,9 @@ public class PlaylistManager implements Listener<ChannelEvent>
         //save the playlist when there are any changes
         mChannelModel.addListener(this);
 
-        mAliasModel.addListener(t -> {
-            //Save the playlist for all alias events
-            schedulePlaylistSave();
-        });
+        mAliasModel.aliasList().addListener((ListChangeListener<Alias>)c -> schedulePlaylistSave());
 
-        mChannelMapModel.addListener(t -> {
-            //Save the playlist for all channel map events
-            schedulePlaylistSave();
-        });
+        mChannelMapModel.getChannelMaps().addListener((ListChangeListener<ChannelMap>)c -> schedulePlaylistSave());
 
         mBroadcastModel.addListener(broadcastEvent -> {
             switch(broadcastEvent.getEvent())
@@ -160,9 +159,9 @@ public class PlaylistManager implements Listener<ChannelEvent>
     /**
      * Icon manager
      */
-    public IconManager getIconManager()
+    public IconModel getIconModel()
     {
-        return mIconManager;
+        return mIconModel;
     }
 
     /**
@@ -246,7 +245,8 @@ public class PlaylistManager implements Listener<ChannelEvent>
 
         JacksonXmlModule xmlModule = new JacksonXmlModule();
         xmlModule.setDefaultUseWrapper(false);
-        ObjectMapper objectMapper = new XmlMapper(xmlModule);
+        ObjectMapper objectMapper = new XmlMapper(xmlModule)
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
         try(InputStream in = Files.newInputStream(path))
         {
@@ -384,10 +384,10 @@ public class PlaylistManager implements Listener<ChannelEvent>
 
         PlaylistV2 playlist = new PlaylistV2();
 
-        playlist.setAliases(mAliasModel.getAliases());
-        playlist.setBroadcastConfigurations(mBroadcastModel.getBroadcastConfigurations());
-        playlist.setChannels(mChannelModel.getChannels());
-        playlist.setChannelMaps(mChannelMapModel.getChannelMaps());
+        playlist.setAliases(new ArrayList(mAliasModel.getAliases()));
+        playlist.setBroadcastConfigurations(new ArrayList(mBroadcastModel.getBroadcastConfigurations()));
+        playlist.setChannels(new ArrayList(mChannelModel.getChannels()));
+        playlist.setChannelMaps(new ArrayList(mChannelMapModel.getChannelMaps()));
         playlist.setVersion(PLAYLIST_CURRENT_VERSION);
 
         //Create a backup copy of the current playlist
@@ -485,7 +485,8 @@ public class PlaylistManager implements Listener<ChannelEvent>
 
             JacksonXmlModule xmlModule = new JacksonXmlModule();
             xmlModule.setDefaultUseWrapper(false);
-            ObjectMapper objectMapper = new XmlMapper(xmlModule);
+            ObjectMapper objectMapper = new XmlMapper(xmlModule)
+                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
             try(InputStream in = Files.newInputStream(files.getPlaylist()))
             {
@@ -507,7 +508,8 @@ public class PlaylistManager implements Listener<ChannelEvent>
 
             JacksonXmlModule xmlModule = new JacksonXmlModule();
             xmlModule.setDefaultUseWrapper(false);
-            ObjectMapper objectMapper = new XmlMapper(xmlModule);
+            ObjectMapper objectMapper = new XmlMapper(xmlModule)
+                .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
             try(InputStream in = Files.newInputStream(files.getLegacyPlaylist()))
             {

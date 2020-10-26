@@ -19,10 +19,12 @@
 
 package io.github.dsheirer.gui.playlist;
 
+import io.github.dsheirer.gui.JavaFxWindowRequest;
+
 /**
  * Request to view a facet of the playlist editor
  */
-public abstract class PlaylistEditorRequest
+public abstract class PlaylistEditorRequest extends JavaFxWindowRequest
 {
     public enum TabName {ALIAS, CHANNEL, PLAYLIST, RADIOREFERENCE, STREAM}
 

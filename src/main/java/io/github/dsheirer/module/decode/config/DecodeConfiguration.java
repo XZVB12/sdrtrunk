@@ -29,6 +29,7 @@ import com.fasterxml.jackson.dataformat.xml.annotation.JacksonXmlRootElement;
 import io.github.dsheirer.controller.config.Configuration;
 import io.github.dsheirer.module.decode.DecoderType;
 import io.github.dsheirer.module.decode.am.DecodeConfigAM;
+import io.github.dsheirer.module.decode.dmr.DecodeConfigDMR;
 import io.github.dsheirer.module.decode.ltrnet.DecodeConfigLTRNet;
 import io.github.dsheirer.module.decode.ltrstandard.DecodeConfigLTRStandard;
 import io.github.dsheirer.module.decode.mpt1327.DecodeConfigMPT1327;
@@ -48,14 +49,15 @@ import io.github.dsheirer.source.tuner.channel.ChannelSpecification;
     @JsonSubTypes.Type(value = DecodeConfigNBFM.class, name = "decodeConfigNBFM"),
     @JsonSubTypes.Type(value = DecodeConfigP25Phase1.class, name = "decodeConfigP25Phase1"),
     @JsonSubTypes.Type(value = DecodeConfigP25Phase2.class, name = "decodeConfigP25Phase2"),
-    @JsonSubTypes.Type(value = DecodeConfigPassport.class, name = "decodeConfigPassport")
+    @JsonSubTypes.Type(value = DecodeConfigPassport.class, name = "decodeConfigPassport"),
+        @JsonSubTypes.Type(value = DecodeConfigDMR.class, name = "decodeConfigDMR")
 })
 @JacksonXmlRootElement(localName = "decode_configuration")
 public abstract class DecodeConfiguration extends Configuration
 {
     public static final int DEFAULT_CALL_TIMEOUT_DELAY_SECONDS = 45;
     public static final int CALL_TIMEOUT_MINIMUM = 1;
-    public static final int CALL_TIMEOUT_MAXIMUM = 300; //5 minutes
+    public static final int CALL_TIMEOUT_MAXIMUM = 180;
 
     public static final int TRAFFIC_CHANNEL_LIMIT_DEFAULT = 3;
     public static final int TRAFFIC_CHANNEL_LIMIT_MINIMUM = 0;
@@ -75,5 +77,11 @@ public abstract class DecodeConfiguration extends Configuration
     public int getTimeslotCount()
     {
         return 1;
+    }
+
+    @JsonIgnore
+    public int[] getTimeslots()
+    {
+        return new int[0];
     }
 }

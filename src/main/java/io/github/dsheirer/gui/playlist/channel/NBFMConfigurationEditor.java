@@ -33,6 +33,7 @@ import io.github.dsheirer.module.decode.nbfm.DecodeConfigNBFM;
 import io.github.dsheirer.module.log.EventLogType;
 import io.github.dsheirer.module.log.config.EventLogConfiguration;
 import io.github.dsheirer.playlist.PlaylistManager;
+import io.github.dsheirer.preference.UserPreferences;
 import io.github.dsheirer.record.RecorderType;
 import io.github.dsheirer.record.config.RecordConfiguration;
 import io.github.dsheirer.source.config.SourceConfiguration;
@@ -73,10 +74,11 @@ public class NBFMConfigurationEditor extends ChannelConfigurationEditor
     /**
      * Constructs an instance
      * @param playlistManager
+     * @param userPreferences
      */
-    public NBFMConfigurationEditor(PlaylistManager playlistManager)
+    public NBFMConfigurationEditor(PlaylistManager playlistManager, UserPreferences userPreferences)
     {
-        super(playlistManager);
+        super(playlistManager, userPreferences);
         getTitledPanesBox().getChildren().add(getSourcePane());
         getTitledPanesBox().getChildren().add(getDecoderPane());
         getTitledPanesBox().getChildren().add(getAuxDecoderPane());
@@ -198,7 +200,7 @@ public class NBFMConfigurationEditor extends ChannelConfigurationEditor
     {
         if(mSourceConfigurationEditor == null)
         {
-            mSourceConfigurationEditor = new FrequencyEditor(getTunerModel(), false);
+            mSourceConfigurationEditor = new FrequencyEditor(getTunerModel());
 
             //Add a listener so that we can push change notifications up to this editor
             mSourceConfigurationEditor.modifiedProperty()
@@ -241,6 +243,7 @@ public class NBFMConfigurationEditor extends ChannelConfigurationEditor
         if(mBandwidthButton == null)
         {
             mBandwidthButton = new SegmentedButton();
+            mBandwidthButton.getStyleClass().add(SegmentedButton.STYLE_CLASS_DARK);
             mBandwidthButton.setDisable(true);
 
             for(DecodeConfigNBFM.Bandwidth bandwidth : DecodeConfigNBFM.Bandwidth.values())

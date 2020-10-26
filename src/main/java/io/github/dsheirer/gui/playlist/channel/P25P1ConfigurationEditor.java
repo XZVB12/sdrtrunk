@@ -34,6 +34,7 @@ import io.github.dsheirer.module.decode.p25.phase1.P25P1Decoder;
 import io.github.dsheirer.module.log.EventLogType;
 import io.github.dsheirer.module.log.config.EventLogConfiguration;
 import io.github.dsheirer.playlist.PlaylistManager;
+import io.github.dsheirer.preference.UserPreferences;
 import io.github.dsheirer.record.RecorderType;
 import io.github.dsheirer.record.config.RecordConfiguration;
 import io.github.dsheirer.source.config.SourceConfiguration;
@@ -80,10 +81,11 @@ public class P25P1ConfigurationEditor extends ChannelConfigurationEditor
     /**
      * Constructs an instance
      * @param playlistManager
+     * @param userPreferences
      */
-    public P25P1ConfigurationEditor(PlaylistManager playlistManager)
+    public P25P1ConfigurationEditor(PlaylistManager playlistManager, UserPreferences userPreferences)
     {
-        super(playlistManager);
+        super(playlistManager, userPreferences);
         getTitledPanesBox().getChildren().add(getSourcePane());
         getTitledPanesBox().getChildren().add(getDecoderPane());
         getTitledPanesBox().getChildren().add(getEventLogPane());
@@ -189,7 +191,10 @@ public class P25P1ConfigurationEditor extends ChannelConfigurationEditor
     {
         if(mSourceConfigurationEditor == null)
         {
-            mSourceConfigurationEditor = new FrequencyEditor(getTunerModel(), true);
+            mSourceConfigurationEditor = new FrequencyEditor(getTunerModel(),
+                DecodeConfigP25Phase1.CHANNEL_ROTATION_DELAY_MINIMUM_MS,
+                DecodeConfigP25Phase1.CHANNEL_ROTATION_DELAY_MAXIMUM_MS,
+                DecodeConfigP25Phase1.CHANNEL_ROTATION_DELAY_DEFAULT_MS);
 
             //Add a listener so that we can push change notifications up to this editor
             mSourceConfigurationEditor.modifiedProperty()
@@ -222,6 +227,7 @@ public class P25P1ConfigurationEditor extends ChannelConfigurationEditor
         if(mModulationSegmentedButton == null)
         {
             mModulationSegmentedButton = new SegmentedButton();
+            mModulationSegmentedButton.getStyleClass().add(SegmentedButton.STYLE_CLASS_DARK);
             mModulationSegmentedButton.getButtons().addAll(getC4FMToggleButton(), getLSMToggleButton());
             mModulationSegmentedButton.getToggleGroup().selectedToggleProperty().addListener(new ChangeListener<Toggle>()
             {
